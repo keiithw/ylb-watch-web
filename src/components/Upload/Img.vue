@@ -2,20 +2,29 @@
   <div class="upload-box">
     <el-upload
       :id="uuid"
-      action="#"
       :class="['upload', self_disabled ? 'disabled' : '', drag ? 'no-border' : '']"
       :multiple="false"
       :disabled="self_disabled"
       :show-file-list="false"
+      :auto-upload="true"
       :http-request="handleHttpUpload"
       :before-upload="beforeUpload"
-      :on-success="uploadSuccess"
-      :on-error="uploadError"
       :drag="drag"
       :accept="fileType.join(',')"
     >
       <template v-if="imageUrl">
-        <img :src="imageUrl" class="upload-image" alt="图片预览" />
+        <img 
+          v-if="!imageLoadError"
+          :src="imageUrl" 
+          class="upload-image" 
+          alt="图片预览"
+          @error="handleImageError"
+          @load="handleImageLoad"
+        />
+        <div v-else class="image-error-placeholder">
+          <el-icon><Picture /></el-icon>
+          <span>图片加载失败</span>
+        </div>
         <div class="upload-handle" @click.stop>
           <div v-if="!self_disabled" class="handle-icon" @click="editImg">
             <el-icon><Edit /></el-icon>
@@ -87,6 +96,11 @@ const uuid = ref('id-' + generateUUID());
 
 // 查看图片
 const imgViewVisible = ref(false);
+// 图片加载状态
+const imageLoadError = ref(false);
+// 防止重复上传 - 使用文件对象引用和 Promise 锁机制
+const uploadingFiles = new Set<File>();
+let uploadingPromise: Promise<any> | null = null;
 // 获取 el-form 组件上下文
 const formContext = inject(formContextKey, void 0);
 // 获取 el-form-item 组件上下文
@@ -96,6 +110,11 @@ const self_disabled = computed(() => {
   return props.disabled || formContext?.disabled;
 });
 
+// 生成文件唯一标识
+const getFileId = (file: File): string => {
+  return `${file.name}_${file.size}_${file.lastModified}`;
+};
+
 /**
  * @description 图片上传
  * @param options upload 所有配置项
@@ -104,13 +123,67 @@ const emit = defineEmits<{
   'update:imageUrl': [value: string];
   change: [value: IUploadResult];
 }>();
+
 const handleHttpUpload = async (options: UploadRequestOptions) => {
+  const file = options.file;
+  const fileId = getFileId(file);
+  console.log('[handleHttpUpload] 开始处理上传:', file.name, '文件ID:', fileId, '当前上传文件数:', uploadingFiles.size, '当前上传Promise:', uploadingPromise ? '存在' : 'null');
+  
+  // 使用文件对象引用检查是否正在上传（最严格的检查）
+  if (uploadingFiles.has(file)) {
+    console.warn('[handleHttpUpload] 该文件对象正在上传中，忽略重复请求:', file.name);
+    return;
+  }
+  
+  // 如果已经有其他文件在上传，也直接返回
+  if (uploadingPromise) {
+    console.warn('[handleHttpUpload] 有其他文件正在上传中，忽略重复请求:', file.name);
+    return;
+  }
+  
+  // 立即添加到上传集合中
+  uploadingFiles.add(file);
+  
+  // 创建上传 Promise 并立即保存，防止并发调用
+  uploadingPromise = (async () => {
+    try {
+      console.log('[handleHttpUpload] 开始上传文件:', file.name, '时间戳:', Date.now());
+      console.log('[handleHttpUpload] 调用 uploadFile API 前');
+      const uploadPromise = uploadFile({ file: file, dirTag: props.dir });
+      console.log('[handleHttpUpload] 调用 uploadFile API 后，等待响应...');
+      const { data } = await uploadPromise;
+      console.log('[handleHttpUpload] 上传成功:', data, '时间戳:', Date.now());
+      emit('update:imageUrl', data.url);
+      emit('change', data);
+      // 调用 el-form 内部的校验方法（可自动校验）
+      formItemContext?.prop && formContext?.validateField([formItemContext.prop as string]);
+      // 显示成功通知
+      ElNotification({
+        title: '温馨提示',
+        message: '图片上传成功！',
+        type: 'success'
+      });
+      return data;
+    } catch (error) {
+      console.error('[handleHttpUpload] 上传失败:', error);
+      // 显示错误通知
+      ElNotification({
+        title: '温馨提示',
+        message: '图片上传失败，请您重新上传！',
+        type: 'error'
+      });
+      throw error;
+    } finally {
+      // 清除上传状态
+      uploadingFiles.delete(file);
+      uploadingPromise = null;
+    }
+  })();
+  
   try {
-    const { data } = await uploadFile({ file: options.file, dirTag: props.dir });
-    emit('update:imageUrl', data.url);
-    emit('change', data);
-    // 调用 el-form 内部的校验方法（可自动校验）
-    formItemContext?.prop && formContext?.validateField([formItemContext.prop as string]);
+    const data = await uploadingPromise;
+    // 手动调用成功回调
+    options.onSuccess(data);
   } catch (error) {
     options.onError(error as any);
   }
@@ -137,15 +210,40 @@ const editImg = () => {
  * @param rawFile 选择的文件
  * */
 const beforeUpload: UploadProps['beforeUpload'] = rawFile => {
+  const fileId = getFileId(rawFile);
+  console.log('[beforeUpload] 文件选择:', rawFile.name, '当前上传文件数:', uploadingFiles.size, '当前上传Promise:', uploadingPromise ? '存在' : 'null', '新文件ID:', fileId);
+  
+  // 使用文件对象引用检查是否正在上传
+  if (uploadingFiles.has(rawFile)) {
+    console.warn('[beforeUpload] 该文件对象正在上传中，阻止重复上传:', rawFile.name);
+    return false;
+  }
+  
+  // 检查是否有其他文件正在上传（防止并发上传）
+  if (uploadingPromise) {
+    console.warn('[beforeUpload] 有其他文件正在上传中，请等待完成');
+    ElNotification({
+      title: '温馨提示',
+      message: '有文件正在上传中，请等待完成后再上传！',
+      type: 'warning'
+    });
+    return false;
+  }
+  
+  // 文件类型和大小验证
   const imgSize = rawFile.size / 1024 / 1024 < props.fileSize;
   const imgType = props.fileType.includes(rawFile.type as File.ImageMimeType);
-  if (!imgType)
+  
+  if (!imgType) {
     ElNotification({
       title: '温馨提示',
       message: '上传图片不符合所需的格式！',
       type: 'warning'
     });
-  if (!imgSize)
+    return false;
+  }
+  
+  if (!imgSize) {
     setTimeout(() => {
       ElNotification({
         title: '温馨提示',
@@ -153,30 +251,16 @@ const beforeUpload: UploadProps['beforeUpload'] = rawFile => {
         type: 'warning'
       });
     }, 0);
-  return imgType && imgSize;
+    return false;
+  }
+  
+  // 验证通过
+  console.log('[beforeUpload] 验证通过，允许上传:', fileId);
+  return true;
 };
 
-/**
- * @description 图片上传成功
- * */
-const uploadSuccess = () => {
-  ElNotification({
-    title: '温馨提示',
-    message: '图片上传成功！',
-    type: 'success'
-  });
-};
-
-/**
- * @description 图片上传错误
- * */
-const uploadError = () => {
-  ElNotification({
-    title: '温馨提示',
-    message: '图片上传失败，请您重新上传！',
-    type: 'error'
-  });
-};
+// 注意：当使用 http-request 时，成功和错误处理都在 handleHttpUpload 中通过 options.onSuccess 和 options.onError 处理
+// 不再需要单独的 uploadSuccess 和 uploadError 回调，避免重复触发
 </script>
 
 <style scoped lang="scss">

@@ -50,7 +50,7 @@ defineOptions({
   name: 'LayoutClassic'
 });
 
-const title = import.meta.env.VITE_APP_TITLE;
+const title = 'Custom Watch Manufacturer - OEM/ODM Services';
 
 const route = useRoute();
 const authStore = useAuthStore();

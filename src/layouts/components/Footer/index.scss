@@ -3,10 +3,28 @@
   background-color: var(--el-bg-color);
   border-top: 1px solid var(--el-border-color-light);
 
+  .footer-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .separator {
+    color: var(--el-text-color-placeholder);
+    margin: 0 4px;
+  }
+
   a {
     font-size: 14px;
     color: var(--el-text-color-secondary);
     text-decoration: none;
     letter-spacing: 0.5px;
+    transition: color 0.3s;
+
+    &:hover {
+      color: var(--el-color-primary);
+    }
   }
 }

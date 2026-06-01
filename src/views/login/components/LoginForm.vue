@@ -107,12 +107,8 @@ const login = () => {
     }
     try {
       loading.value = true;
-      const { data } = await getCaptchaStatus(); // 获取验证码状态
-      if (data) {
-        captchaRef.value?.acceptParams(); // 打开验证码弹窗
-      } else {
-        await performLogin(); // 执行登录
-      }
+      // 跳过验证码检查，直接执行登录
+      await performLogin();
     } finally {
       loading.value = false;
     }

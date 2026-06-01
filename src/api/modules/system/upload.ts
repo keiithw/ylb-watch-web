@@ -21,3 +21,16 @@ export const uploadFile = (params: IUpload.File, config?: AxiosRequestConfig<{}>
 export const uploadTmpFile = (params: IUpload.File, config?: AxiosRequestConfig<{}> | undefined) => {
   return http.upload<IUploadResult>(ADMIN_MODULE + `/sys-temp-file/upload`, params, config);
 };
+
+/**
+ * 处理富文本内容中的图片
+ * @param htmlContent 富文本HTML内容
+ * @param dirTag 目录标签，默认为 'blog'
+ * @returns {*}
+ */
+export const processRichTextImages = (htmlContent: string, dirTag: string = 'blog') => {
+  return http.post<{ data: string }>(ADMIN_MODULE + `/sys-file/process-rich-text-images`, {
+    htmlContent,
+    dirTag
+  });
+};
